@@ -49,6 +49,7 @@
         '@': path.resolve(__dirname, './src'),
       },
     },
+    base: '/treasure_game/',
     build: {
       target: 'esnext',
       outDir: 'build',
