@@ -1,4 +1,8 @@
 # Use Claude Code to Explore and Develop the project 
+
+### Live demo (GitHub Pages, frontend only — login/history don't work)
+https://seeyu90.github.io/treasure_game/
+
 ### Download the zip file of branch 'initial'
 https://github.com/uopsdod/claude_code_treasure_game/tree/initial
 
