@@ -1,0 +1,37 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project overview
+
+A small single-page "Interactive Treasure Box Game" built with React + TypeScript + Vite. This is a learning/demo project (see `README.md`) used to walk through Claude Code workflows (context management, screenshots, plan mode, custom commands, etc.) — it is not a production app with tests or CI.
+
+## Commands
+
+```bash
+npm install      # install dependencies (also installs the backend's devDependency: concurrently)
+npm run dev      # starts BOTH the Vite dev server (localhost:3000) and the API server (localhost:4000) via `concurrently`
+npm run dev:client  # Vite only
+npm run dev:server  # API server only (`node --watch server/index.ts`)
+npm run build     # production build, output to ./build (frontend only; does not build/bundle server/)
+```
+
+There is no lint, typecheck, or test script configured in `package.json` — don't assume `npm test` or `npm run lint` exist. There is also no `tsconfig.json` — TypeScript is not type-checked as a build step anywhere (Vite/esbuild/swc only transpile); catch type errors by reading the code carefully.
+
+Requires Node.js 22.5+/24+ (uses the built-in `node:sqlite` module and runs `.ts` files directly via Node's native type-stripping — no `ts-node`/`tsx`).
+
+A custom slash command `/deploy_vercel` (`.claude/commands/deploy_vercel.md`) deploys the **frontend only** to Vercel as a Preview build (`vercel.json` sets `outputDirectory: build` since Vite is configured with a non-default `build.outDir`). It deliberately does not deploy `server/` — see the Architecture note on `vercel.json` below for why.
+
+## Architecture
+
+- **Entry point**: `index.html` → `src/main.tsx` → `src/App.tsx`, wrapped in `AuthProvider` (`src/contexts/AuthContext.tsx`). `App.tsx` is a single component that contains all game state and logic (no routing, no external state management library).
+- **Game logic** lives entirely in `src/App.tsx`: three `Box` objects are generated per round, one is randomly assigned the treasure, opening a box awards +$100 (treasure) or -$50 (skeleton), and the round ends when the treasure is found or all boxes are opened. Animations use `motion/react` (Motion, formerly Framer Motion).
+- **Assets**: images in `src/assets/`, sound effects in `src/audios/` (played directly via `Audio` objects / `<audio>` in `App.tsx`), attributions tracked in `Attributions.md`.
+- **Backend (`server/`)**: a small hand-rolled `node:http` server (no Express/router lib) on port 4000, using the built-in `node:sqlite` (`DatabaseSync`) at `server/data/game.db` (gitignored, created on first run). Password hashing uses `node:crypto` `scrypt` (no bcrypt); sessions are opaque random tokens in a `sessions` table (no JWT), sent by the client as `Authorization: Bearer <token>`. Routes are in `server/routes/{auth,games}.ts`, dispatched from `server/index.ts` via a `"METHOD /path"` lookup table; `requireAuth()` in `server/routes/middleware.ts` guards protected routes. In dev, Vite proxies `/api/*` to `http://localhost:4000` (`vite.config.ts`) so the frontend can call relative `/api/...` paths with no CORS handling. This proxy is dev-only — a production deployment of `build/` would need its own reverse proxy or for the Node server to also serve the static files.
+- **Auth/score-history flow**: guest play (no login) is the default and unchanged — game state never requires a signed-in user. `AuthWidget` (top-right of `App.tsx`) exposes login/signup (`AuthDialog`) and, when signed in, a "History" button (`HistoryDialog`) and logout. `useAuth()` from `AuthContext` exposes `{ user, token, ... }`; the session token is persisted in `localStorage` (`treasure_game_token`) and restored on load via `GET /api/auth/me`. `App.tsx`'s `openBox` posts a completed game (`score`, `result: 'win'|'lose'|'tie'`) to `POST /api/games` only when `token` is set — guests never hit that endpoint. `src/lib/api.ts` holds the frontend's `fetch` wrappers for all `/api/*` calls.
+- **`src/components/ui/`**: a large shadcn/ui-style component library (~48 files) generated as scaffolding from Figma Make. `AuthDialog`/`HistoryDialog` reuse `dialog.tsx`, `tabs.tsx`, `input.tsx`, `label.tsx`, `button.tsx`, `table.tsx` from here; most of the remaining files are still unused, available-but-inactive building blocks.
+- **`src/components/figma/ImageWithFallback.tsx`**: a Figma Make scaffolding helper that renders a placeholder SVG on image load error. Not currently used.
+- **Styling — important gotcha**: Tailwind CSS utility classes are used directly in JSX, but there is no `tailwind.config.*`/`postcss.config.*` and no live Tailwind build step. `src/index.css` (imported from `main.tsx`) is a **static, pre-generated Tailwind v4 output** frozen at Figma Make export time — it is never regenerated. **Any new Tailwind utility class you write that isn't already present in `src/index.css` will silently have no effect** (no build error — the class just won't be styled). Before using a class you haven't seen elsewhere in this repo, `grep` for it in `src/index.css` first (e.g. `grep -c '\.grid-cols-2[^a-zA-Z0-9_-]' src/index.css`); if it's missing, either find an equivalent class that's already compiled in, or accept the visual risk. `src/styles/globals.css` (CSS custom properties / design tokens for light+dark themes) is separate leftover scaffolding and is **not imported anywhere** — don't assume changes there take effect either.
+- **`vercel.json`**: only exists to fix Vercel's default output-directory guess (`build`, not Vite's default `dist`) for `/deploy_vercel`-driven Preview deploys. Those deploys ship the frontend only — `server/` (a long-running `node:http` process persisting to a local `server/data/game.db` file) is fundamentally incompatible with Vercel's stateless/serverless execution model, so on a Vercel deploy the game is playable as a guest but login/signup/history will not work. Don't try to "fix" this by wrapping `server/index.ts` in a serverless function without an explicit request — the SQLite file still wouldn't persist across invocations.
+- **Path alias**: `@` resolves to `./src` (configured in `vite.config.ts`). `vite.config.ts` also aliases versioned npm import specifiers (e.g. `sonner@2.0.3`) to their unversioned package names — an artifact of the Figma Make export; keep this pattern if adding new frontend dependencies that were exported the same way (this does not apply to `server/`, which has no such aliasing).
+- No git repository is currently initialized in this directory.
